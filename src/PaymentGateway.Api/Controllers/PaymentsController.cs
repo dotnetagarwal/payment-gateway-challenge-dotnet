@@ -1,7 +1,9 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 
+using PaymentGateway.Api.Models.Requests;
 using PaymentGateway.Api.Models.Responses;
-using PaymentGateway.Api.Services;
+using PaymentGateway.Api.Validations;
+using PaymentGateway.Services;
 
 namespace PaymentGateway.Api.Controllers;
 
@@ -9,18 +11,40 @@ namespace PaymentGateway.Api.Controllers;
 [ApiController]
 public class PaymentsController : Controller
 {
-    private readonly PaymentsRepository _paymentsRepository;
+    private readonly IPaymentsService _paymentService;
 
-    public PaymentsController(PaymentsRepository paymentsRepository)
+    public PaymentsController(IPaymentsService paymentService)
     {
-        _paymentsRepository = paymentsRepository;
+        _paymentService = paymentService;
     }
 
-    [HttpGet("{id:guid}")]
-    public async Task<ActionResult<PostPaymentResponse?>> GetPaymentAsync(Guid id)
+    [HttpPost]
+    public async Task<IActionResult> ProcessPayment([FromBody] PaymentRequest request)
     {
-        var payment = _paymentsRepository.Get(id);
+        if (!ModelState.IsValid)
+        { 
+          return BadRequest(ModelState);
+        }
 
+        if (!ExpiryDateValidator.IsExpiryDateValid(request.ExpiryMonth, request.ExpiryYear))
+        {
+            return BadRequest("Card expiry date must be in the future.");
+        }
+
+        var response = await _paymentService.ProcessPaymentAsync(request);
+        return Ok(response);
+    }
+
+
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<PaymentResponse?>> GetPaymentAsync(Guid id)
+    {
+        var payment = await _paymentService.GetPaymentAsync(id);
+        if (payment == null)
+        {
+            return NotFound();
+        }
+           
         return new OkObjectResult(payment);
     }
 }

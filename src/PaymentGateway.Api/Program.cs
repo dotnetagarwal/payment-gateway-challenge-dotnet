@@ -1,15 +1,36 @@
+
+using System.Text.Json.Serialization;
+
+using PaymentGateway.Api.Configurations;
+using PaymentGateway.Api.Middlewares;
+using PaymentGateway.Api.Policies;
+using PaymentGateway.Api.Repositories;
 using PaymentGateway.Api.Services;
+using PaymentGateway.Api.Swagger;
+using PaymentGateway.Services;
+using Api = PaymentGateway.Api;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
+builder.Services.AddControllers().AddJsonOptions(opts =>
+{
+    opts.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
 
-builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerWithApiKey();
 
-builder.Services.AddSingleton<PaymentsRepository>();
+builder.Services.AddHttpClient<IBankClient, BankClient>(client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["BankSimulator:BaseAddress"] ??
+                                        throw new ArgumentNullException("Bank Simulator Payments Address is required"));
+
+}).AddPolicyHandler(RetryPolicy.GetRetryPolicy());
+
+builder.Services.AddSingleton<IPaymentsRepository, PaymentsRepository>();
+builder.Services.AddSingleton<IPaymentsService, PaymentsService>();
+
 
 var app = builder.Build();
 
@@ -19,6 +40,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 app.UseHttpsRedirection();
 
