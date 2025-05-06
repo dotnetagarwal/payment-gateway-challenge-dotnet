@@ -48,3 +48,5 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+public partial class Program { } //Just added for Controller Testing

@@ -52,7 +52,7 @@ public class PaymentsServiceTests
     [Theory]
     [InlineData(true, "411111111111111", PaymentStatus.Authorized)]
     [InlineData(false, "411111111111112", PaymentStatus.Declined)]
-    public async Task ProcessPaymentAsync_WithBankResponse_SavesAndReturnsCorrectStatus(bool isAuth, string cardNumber, PaymentStatus expected)
+    public async Task ProcessPaymentAsync_WithBankResponse_SavesAndReturnsCorrectStatus(bool isAuth, string cardNumber, PaymentStatus expectedPaymentStatus)
     {
         // Arrange
         _bankClientMock
@@ -65,9 +65,9 @@ public class PaymentsServiceTests
         var result = await _sut.ProcessPaymentAsync(req);
 
         // Assert
-        Assert.Equal(expected, result.Status);
+        Assert.Equal(expectedPaymentStatus, result.Status);
         _repoMock.Verify(r => r.AddAsync(It.Is<PaymentResponse>(
-            p => p.Status == expected &&
+            p => p.Status == expectedPaymentStatus &&
                  p.CardNumberLastFour == req.CardNumber.Substring(req.CardNumber.Length - 4) &&
                  p.Amount == req.Amount &&
                  p.Currency == req.Currency

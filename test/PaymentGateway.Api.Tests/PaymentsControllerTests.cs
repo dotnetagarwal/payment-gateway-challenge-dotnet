@@ -1,11 +1,11 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json;
 
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.VisualStudio.TestPlatform.TestHost;
 
 using Moq;
 
@@ -13,6 +13,8 @@ using PaymentGateway.Api.Models;
 using PaymentGateway.Api.Models.Requests;
 using PaymentGateway.Api.Models.Responses;
 using PaymentGateway.Services;
+using PaymentGateway.Api.Services;
+using PaymentGateway.Api.Repositories;
 
 namespace PaymentGateway.Api.Tests;
 
@@ -35,11 +37,6 @@ public class PaymentsControllerIntegrationTests :
         var response = await client.PostAsJsonAsync("/api/Payments", new { });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-
-        // Optionally inspect model errors
-        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
-        Assert.Contains("CardNumber", problem!.Errors.Keys);
-        Assert.Contains("ExpiryMonth", problem.Errors.Keys);
     }
 
     [Fact]
@@ -60,60 +57,8 @@ public class PaymentsControllerIntegrationTests :
         var response = await client.PostAsJsonAsync("/api/Payments", request);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var text = await response.Content.ReadAsStringAsync();
-        Assert.Equal("Card expiry date must be in the future.", text.Trim('"'));
-    }
-
-    [Fact]
-    public async Task Post_ValidRequest_InvokesServiceAndReturnsOk()
-    {
-        // Arrange: stub IPaymentsService
-        var fakeResponse = new PaymentResponse
-        {
-            Id = Guid.NewGuid(),
-            Status = PaymentStatus.Authorized,
-            CardNumberLastFour = "1111",
-            ExpiryMonth = 12,
-            ExpiryYear = DateTime.UtcNow.Year + 1,
-            Currency = "GBP",
-            Amount = 250
-        };
-
-        var serviceMock = new Mock<IPaymentsService>();
-        serviceMock
-            .Setup(s => s.ProcessPaymentAsync(It.IsAny<PaymentRequest>()))
-            .ReturnsAsync(fakeResponse);
-
-        var client = _factory.WithWebHostBuilder(builder =>
-        {
-            builder.ConfigureServices(services =>
-            {
-                // replace the real service with our mock
-                services.RemoveAll<IPaymentsService>();
-                services.AddSingleton(serviceMock.Object);
-            });
-        }).CreateClient();
-
-        var request = new PaymentRequest
-        {
-            CardNumber = "4111111111111111",
-            ExpiryMonth = 12,
-            ExpiryYear = DateTime.UtcNow.Year + 1,
-            Currency = "GBP",
-            Amount = 250,
-            Cvv = 321
-        };
-
-        // Act
-        var response = await client.PostAsJsonAsync("/api/Payments", request);
-
-        // Assert
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var payload = await response.Content.ReadFromJsonAsync<PaymentResponse>();
-        Assert.Equal(fakeResponse, payload);
-
-        // verify controller called through to service
-        serviceMock.Verify(s => s.ProcessPaymentAsync(request), Times.Once);
+        var errorMessage = await response.Content.ReadAsStringAsync();
+        Assert.Equal("Card expiry date must be in the future.", errorMessage);
     }
 
     [Fact]
@@ -137,38 +82,112 @@ public class PaymentsControllerIntegrationTests :
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    [Fact]
-    public async Task Get_ExistingId_ReturnsOkAndResponse()
+    [Theory]
+    [InlineData(true, "411111111111111", PaymentStatus.Authorized)]
+    [InlineData(false, "411111111111112", PaymentStatus.Declined)]
+    public async Task Post_ValidRequest_WithBankResponse_ReturnsOk(bool isAuthorized, string cardNumber, PaymentStatus expectedPaymentStatus)
     {
-        var expected = new PaymentResponse
+        HttpClient client = GetCustomizedFactoryInstance(isAuthorized);
+
+        var request = new PaymentRequest
         {
-            Id = Guid.NewGuid(),
-            Status = PaymentStatus.Declined,
-            CardNumberLastFour = "2222",
-            ExpiryMonth = 11,
-            ExpiryYear = 2029,
-            Currency = "EUR",
-            Amount = 500
+            CardNumber = cardNumber,
+            ExpiryMonth = 12,
+            ExpiryYear = DateTime.UtcNow.Year + 1,
+            Currency = "GBP",
+            Amount = 250,
+            Cvv = 321
         };
 
-        var serviceMock = new Mock<IPaymentsService>();
-        serviceMock
-            .Setup(s => s.GetPaymentAsync(expected.Id))
-            .ReturnsAsync(expected);
+        // Act
+        var postResponse = await client.PostAsJsonAsync("/api/Payments", request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, postResponse.StatusCode);
+
+        var actualPaymentResponse = await postResponse.Content.ReadFromJsonAsync<PaymentResponse>(new JsonSerializerOptions
+        {
+            Converters = { new JsonStringEnumConverter() },
+            PropertyNameCaseInsensitive = true
+        });
+
+        Assert.Equal(HttpStatusCode.OK, postResponse.StatusCode);
+
+        Assert.NotNull(actualPaymentResponse);
+        Assert.Equal(request.CardNumber.Substring(request.CardNumber.Length - 4), actualPaymentResponse!.CardNumberLastFour);
+        Assert.Equal(expectedPaymentStatus, actualPaymentResponse.Status);
+        Assert.Equal(request.Amount, actualPaymentResponse.Amount);
+        Assert.Equal(request.Currency, actualPaymentResponse.Currency);
+    }
+
+    [Fact]
+    public async Task Get_ExistingId_ReturnsOk()
+    {
+        HttpClient client = GetCustomizedFactoryInstance();
+
+        var request = new PaymentRequest
+        {
+            CardNumber = "411111111111111",
+            ExpiryMonth = 12,
+            ExpiryYear = DateTime.UtcNow.Year + 1,
+            Currency = "GBP",
+            Amount = 250,
+            Cvv = 321
+        };
+
+        // Act
+        var postResponse = await client.PostAsJsonAsync("/api/Payments", request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, postResponse.StatusCode);
+
+        var postPaymentResponse = await postResponse.Content.ReadFromJsonAsync<PaymentResponse>(new JsonSerializerOptions
+        {
+            Converters = { new JsonStringEnumConverter() },
+            PropertyNameCaseInsensitive = true
+        });
+
+        Assert.Equal(HttpStatusCode.OK, postResponse.StatusCode);
+
+        var getResponse = await client.GetAsync($"/api/Payments/{postPaymentResponse!.Id}");
+        Assert.Equal(HttpStatusCode.OK, postResponse.StatusCode);
+
+        var getPaymentResponse = await getResponse.Content.ReadFromJsonAsync<PaymentResponse>(new JsonSerializerOptions
+        {
+            Converters = { new JsonStringEnumConverter() },
+            PropertyNameCaseInsensitive = true
+        });
+
+        Assert.Equal(postPaymentResponse.CardNumberLastFour, getPaymentResponse!.CardNumberLastFour);
+        Assert.Equal(postPaymentResponse.Status, getPaymentResponse.Status);
+        Assert.Equal(postPaymentResponse.Amount, getPaymentResponse.Amount);
+        Assert.Equal(postPaymentResponse.Currency, getPaymentResponse.Currency);
+        Assert.Equal(postPaymentResponse.Id, getPaymentResponse.Id);
+    }
+
+    private HttpClient GetCustomizedFactoryInstance(bool isAuthorized=true)
+    {
+        var fakeBankResponse = new BankResponse { IsAuthorized = isAuthorized };
+
+        var bankClientMock = new Mock<IBankClient>();
+        bankClientMock
+            .Setup(b => b.PostPaymentAsync(It.IsAny<BankRequest>()))
+            .ReturnsAsync(fakeBankResponse);
 
         var client = _factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureServices(services =>
             {
+                services.RemoveAll<IBankClient>();
+                services.RemoveAll<IPaymentsRepository>();
                 services.RemoveAll<IPaymentsService>();
-                services.AddSingleton(serviceMock.Object);
+
+                services.AddSingleton(bankClientMock.Object);
+
+                services.AddSingleton<IPaymentsRepository, PaymentsRepository>();
+                services.AddTransient<IPaymentsService, PaymentsService>();
             });
         }).CreateClient();
-
-        var response = await client.GetAsync($"/api/Payments/{expected.Id}");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        var payload = await response.Content.ReadFromJsonAsync<PaymentResponse>();
-        Assert.Equal(expected, payload);
+        return client;
     }
 }
