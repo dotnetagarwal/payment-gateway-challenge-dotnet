@@ -16,6 +16,7 @@ using PaymentGateway.Services;
 using PaymentGateway.Api.Services;
 using PaymentGateway.Api.Repositories;
 using Microsoft.AspNetCore.Mvc;
+using PaymentGateway.Api.Exceptions;
 
 namespace PaymentGateway.Api.Tests;
 
@@ -119,7 +120,7 @@ public class PaymentsControllerIntegrationTests :
     [InlineData(false, "411111111111112", PaymentStatus.Declined)]
     public async Task Post_ValidRequest_WithBankResponse_ReturnsOk(bool isAuthorized, string cardNumber, PaymentStatus expectedPaymentStatus)
     {
-        HttpClient client = GetCustomizedFactoryInstance(isAuthorized);
+        var client = GetCustomizedFactoryClient(isAuthorized);
 
         var request = new PaymentRequest
         {
@@ -151,9 +152,33 @@ public class PaymentsControllerIntegrationTests :
     }
 
     [Fact]
+    public async Task Post_WhenBankReturns503_ReturnsServiceUnavailable()
+    {
+        var bankClientMock = GetBankClientServiceUnavailableMock();
+        var client = GetWebHostBuilderClient(bankClientMock);
+
+        var request = new PaymentRequest
+        {
+            CardNumber = "4111111111111111",
+            ExpiryMonth = 12,
+            ExpiryYear = DateTime.UtcNow.Year + 1,
+            Currency = "USD",
+            Amount = 100,
+            Cvv = 123
+        };
+
+        var response = await client.PostAsJsonAsync("/api/Payments", request);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+
+        var content = await response.Content.ReadAsStringAsync();
+        Assert.Contains(ErrorMessages.BankCurrentlyUnavailable, content); 
+    }
+
+    [Fact]
     public async Task Get_NonexistentId_ReturnsNotFound()
     {
-        HttpClient client = GetCustomizedFactoryInstance();
+        var client = GetCustomizedFactoryClient();
 
         var response = await client.GetAsync($"/api/Payments/{Guid.NewGuid()}");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -162,7 +187,7 @@ public class PaymentsControllerIntegrationTests :
     [Fact]
     public async Task Get_ExistingId_ReturnsOk()
     {
-        HttpClient client = GetCustomizedFactoryInstance();
+        var client = GetCustomizedFactoryClient();
 
         var request = new PaymentRequest
         {
@@ -202,16 +227,15 @@ public class PaymentsControllerIntegrationTests :
         Assert.Equal(postPaymentResponse.Id, getPaymentResponse.Id);
     }
 
-    private HttpClient GetCustomizedFactoryInstance(bool isAuthorized=true)
+    private HttpClient GetCustomizedFactoryClient(bool isAuthorized=true)
     {
-        var fakeBankResponse = new BankResponse { IsAuthorized = isAuthorized };
+        Mock<IBankClient> bankClientMock = GetBankClientMock(isAuthorized);
+        return GetWebHostBuilderClient(bankClientMock);
+    }
 
-        var bankClientMock = new Mock<IBankClient>();
-        bankClientMock
-            .Setup(b => b.PostPaymentAsync(It.IsAny<BankRequest>()))
-            .ReturnsAsync(fakeBankResponse);
-
-        var client = _factory.WithWebHostBuilder(builder =>
+    private HttpClient GetWebHostBuilderClient(Mock<IBankClient> bankClientMock)
+    {
+        return _factory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureServices(services =>
             {
@@ -225,6 +249,24 @@ public class PaymentsControllerIntegrationTests :
                 services.AddTransient<IPaymentsService, PaymentsService>();
             });
         }).CreateClient();
-        return client;
+    }
+
+    private static Mock<IBankClient> GetBankClientMock(bool isAuthorized)
+    {
+        var mockBankResponse = new BankResponse { IsAuthorized = isAuthorized };
+
+        var mockBankClient = new Mock<IBankClient>();
+        mockBankClient
+            .Setup(b => b.PostPaymentAsync(It.IsAny<BankRequest>()))
+            .ReturnsAsync(mockBankResponse);
+        return mockBankClient;
+    }
+    private static Mock<IBankClient> GetBankClientServiceUnavailableMock()
+    {
+        var mockBankClient = new Mock<IBankClient>();
+        mockBankClient
+            .Setup(b => b.PostPaymentAsync(It.IsAny<BankRequest>()))
+            .ThrowsAsync(new ServiceUnavailableException());
+        return mockBankClient;
     }
 }

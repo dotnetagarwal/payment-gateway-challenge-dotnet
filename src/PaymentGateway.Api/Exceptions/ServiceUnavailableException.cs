@@ -2,6 +2,6 @@
 {
     public class ServiceUnavailableException : Exception
     {
-        public ServiceUnavailableException() : base("Acquiring bank is currently unavailable.") { }
+        public ServiceUnavailableException() : base(ErrorMessages.BankCurrentlyUnavailable) { }
     }
 }
