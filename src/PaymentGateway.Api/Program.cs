@@ -1,14 +1,12 @@
 
 using System.Text.Json.Serialization;
 
-using PaymentGateway.Api.Configurations;
 using PaymentGateway.Api.Middlewares;
 using PaymentGateway.Api.Policies;
 using PaymentGateway.Api.Repositories;
 using PaymentGateway.Api.Services;
 using PaymentGateway.Api.Swagger;
 using PaymentGateway.Services;
-using Api = PaymentGateway.Api;
 
 var builder = WebApplication.CreateBuilder(args);
 

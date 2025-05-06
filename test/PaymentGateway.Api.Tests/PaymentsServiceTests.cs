@@ -5,8 +5,9 @@ using PaymentGateway.Api.Models.Requests;
 using PaymentGateway.Api.Models.Responses;
 using PaymentGateway.Api.Repositories;
 using PaymentGateway.Api.Services;
+using PaymentGateway.Services;
 
-namespace PaymentGateway.Services.Tests;
+namespace PaymentGateway.Api.Tests;
 
 public class PaymentsServiceTests
 {
