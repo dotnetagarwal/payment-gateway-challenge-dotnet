@@ -28,7 +28,7 @@ public class PaymentsController : Controller
 
         if (!ExpiryDateValidator.IsExpiryDateValid(request.ExpiryMonth, request.ExpiryYear))
         {
-            return BadRequest("Card expiry date must be in the future.");
+            return BadRequest(ErrorMessages.InvalidCardExpiryDate);
         }
 
         var response = await _paymentService.ProcessPaymentAsync(request);

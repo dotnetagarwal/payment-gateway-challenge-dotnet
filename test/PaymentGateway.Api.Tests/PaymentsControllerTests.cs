@@ -15,6 +15,7 @@ using PaymentGateway.Api.Models.Responses;
 using PaymentGateway.Services;
 using PaymentGateway.Api.Services;
 using PaymentGateway.Api.Repositories;
+using Microsoft.AspNetCore.Mvc;
 
 namespace PaymentGateway.Api.Tests;
 
@@ -58,28 +59,59 @@ public class PaymentsControllerIntegrationTests :
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var errorMessage = await response.Content.ReadAsStringAsync();
-        Assert.Equal("Card expiry date must be in the future.", errorMessage);
+        Assert.Equal(ErrorMessages.InvalidCardExpiryDate, errorMessage);
     }
 
     [Fact]
-    public async Task Get_NonexistentId_ReturnsNotFound()
+    public async Task Post_IncorrectCurrency_ReturnsBadRequestWithCurrencyMessage()
     {
-        var serviceMock = new Mock<IPaymentsService>();
-        serviceMock
-            .Setup(s => s.GetPaymentAsync(It.IsAny<Guid>()))
-            .ReturnsAsync((PaymentResponse?)null);
+        var client = _factory.CreateClient();
 
-        var client = _factory.WithWebHostBuilder(builder =>
+        var request = new PaymentRequest
         {
-            builder.ConfigureServices(services =>
-            {
-                services.RemoveAll<IPaymentsService>();
-                services.AddSingleton(serviceMock.Object);
-            });
-        }).CreateClient();
+            CardNumber = "4111111111111111",
+            ExpiryMonth = 1,
+            ExpiryYear = DateTime.UtcNow.Year + 1, 
+            Currency = "INR",
+            Amount = 100,
+            Cvv = 123
+        };
 
-        var response = await client.GetAsync($"/api/Payments/{Guid.NewGuid()}");
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var response = await client.PostAsJsonAsync("/api/Payments", request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var problemDetails = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+
+        Assert.NotNull(problemDetails);
+        Assert.True(problemDetails!.Errors.ContainsKey("Currency"));
+        Assert.Contains(ErrorMessages.NonSupportedCurrency, problemDetails.Errors["Currency"]);
+    }
+
+    [Fact]
+    public async Task Post_IncorrectCardNumber_ReturnsBadRequestWithCardNumberMessage()
+    {
+        var client = _factory.CreateClient();
+
+        var request = new PaymentRequest
+        {
+            CardNumber = "411111",
+            ExpiryMonth = 1,
+            ExpiryYear = DateTime.UtcNow.Year + 1,
+            Currency = "GBP",
+            Amount = 100,
+            Cvv = 123
+        };
+
+        var response = await client.PostAsJsonAsync("/api/Payments", request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var errorMessage = await response.Content.ReadAsStringAsync();
+
+        var problemDetails = await response.Content.ReadFromJsonAsync<ValidationProblemDetails>();
+
+        Assert.NotNull(problemDetails);
+        Assert.True(problemDetails!.Errors.ContainsKey("CardNumber"));
+        Assert.Contains(ErrorMessages.IncorrectCardNumberLength, problemDetails.Errors["CardNumber"]);
     }
 
     [Theory]
@@ -99,10 +131,8 @@ public class PaymentsControllerIntegrationTests :
             Cvv = 321
         };
 
-        // Act
         var postResponse = await client.PostAsJsonAsync("/api/Payments", request);
 
-        // Assert
         Assert.Equal(HttpStatusCode.OK, postResponse.StatusCode);
 
         var actualPaymentResponse = await postResponse.Content.ReadFromJsonAsync<PaymentResponse>(new JsonSerializerOptions
@@ -121,6 +151,15 @@ public class PaymentsControllerIntegrationTests :
     }
 
     [Fact]
+    public async Task Get_NonexistentId_ReturnsNotFound()
+    {
+        HttpClient client = GetCustomizedFactoryInstance();
+
+        var response = await client.GetAsync($"/api/Payments/{Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Get_ExistingId_ReturnsOk()
     {
         HttpClient client = GetCustomizedFactoryInstance();
@@ -135,10 +174,8 @@ public class PaymentsControllerIntegrationTests :
             Cvv = 321
         };
 
-        // Act
         var postResponse = await client.PostAsJsonAsync("/api/Payments", request);
 
-        // Assert
         Assert.Equal(HttpStatusCode.OK, postResponse.StatusCode);
 
         var postPaymentResponse = await postResponse.Content.ReadFromJsonAsync<PaymentResponse>(new JsonSerializerOptions
