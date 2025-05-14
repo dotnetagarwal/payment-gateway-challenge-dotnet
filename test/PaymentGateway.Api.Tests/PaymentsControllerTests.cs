@@ -159,7 +159,7 @@ public class PaymentsControllerIntegrationTests :
 
         var request = new PaymentRequest
         {
-            CardNumber = "4111111111111111",
+            CardNumber = "4111111111111110",
             ExpiryMonth = 12,
             ExpiryYear = DateTime.UtcNow.Year + 1,
             Currency = "USD",

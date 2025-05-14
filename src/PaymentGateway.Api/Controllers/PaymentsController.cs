@@ -26,6 +26,7 @@ public class PaymentsController : Controller
           return BadRequest(ModelState);
         }
 
+        //TODO This could be moved into separate Request validator 
         if (!ExpiryDateValidator.IsExpiryDateValid(request.ExpiryMonth, request.ExpiryYear))
         {
             return BadRequest(ErrorMessages.InvalidCardExpiryDate);
@@ -42,6 +43,7 @@ public class PaymentsController : Controller
         var payment = await _paymentService.GetPaymentAsync(id);
         if (payment == null)
         {
+            //TODO We can log in case of payments not found for particular payment id
             return NotFound();
         }
            
